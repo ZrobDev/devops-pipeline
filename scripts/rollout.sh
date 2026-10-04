@@ -137,7 +137,7 @@ while IFS=$'\t' read -r repo pushed archived default; do
 
     # Review rules for Codex + Claude. CLAUDE.md that is a regular-file twin of AGENTS.md gets the same append.
     if ! grep -qs '^## Code Review Rules' "$DEST_ROOT/AGENTS.md"; then
-      twin=0; [[ -f "$DEST_ROOT/CLAUDE.md" && ! -L "$DEST_ROOT/CLAUDE.md" ]] && cmp -s "$DEST_ROOT/AGENTS.md" "$DEST_ROOT/CLAUDE.md" && twin=1
+      twin=0; [[ -f "$DEST_ROOT/CLAUDE.md" && ! -L "$DEST_ROOT/CLAUDE.md" && ! "$DEST_ROOT/CLAUDE.md" -ef "$DEST_ROOT/AGENTS.md" ]] && cmp -s "$DEST_ROOT/AGENTS.md" "$DEST_ROOT/CLAUDE.md" && twin=1
       { [[ -s "$DEST_ROOT/AGENTS.md" ]] && echo; cat "$T/code-review-rules.md"; } >> "$DEST_ROOT/AGENTS.md"; ADDED+=(AGENTS.md)
       ((twin)) && cp "$DEST_ROOT/AGENTS.md" "$DEST_ROOT/CLAUDE.md" && ADDED+=(CLAUDE.md)
     fi
