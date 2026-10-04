@@ -59,8 +59,12 @@ doc was dropped.
 
 ## Known gaps
 
-- **Codex has no per-command deny.** Claude Code and OpenCode deny `gh pr merge`;
-  Codex CLI cannot. Do not give Codex sessions a token that can merge.
+- **The merge deny is a guardrail, not a boundary.** Claude Code and OpenCode deny
+  `gh pr merge`, `gh <global flags> pr merge` and `gh api …merge…` (the `-R` form slipped
+  past the first pattern; found in review, fixed, verified live). It stops an agent merging
+  by accident or habit. It cannot stop a determined one: the gh token itself can merge, and
+  a command can be spelled many ways. Codex CLI has no per-command deny at all. Do not give
+  a Codex session a token that can merge.
 - **zizmor `ref-confusion` is off.** It must list branches of this private repo,
   which a caller's `GITHUB_TOKEN` cannot read, and it aborts the whole run
   rather than warning. Every other online audit stays on. Config: `zizmor.yml`
