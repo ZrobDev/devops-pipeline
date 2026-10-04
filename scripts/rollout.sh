@@ -43,8 +43,8 @@ T="$HERE/templates"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 CUTOFF="$(date -u -d '90 days ago' +%FT%TZ)"
 
-if ((APPLY)); then
-  # Fail before touching any repo, not halfway through a wave.
+if ((APPLY)) && [[ "$ONLY_TIER" != dormant ]]; then
+  # Fail before touching any repo, not halfway through a wave. Dormant repos never get the token.
   doppler secrets get "$SECRET" --plain --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" >/dev/null \
     || { echo "Doppler has no $SECRET in $DOPPLER_PROJECT/$DOPPLER_CONFIG; see docs/setup-secrets.md" >&2; exit 1; }
 fi
@@ -60,9 +60,11 @@ add_file() {  # add_file SRC DEST: copy unless DEST exists; records what happene
   mkdir -p "$(dirname "$DEST_ROOT/$2")"; cp "$1" "$DEST_ROOT/$2"; ADDED+=("$2")
 }
 
+row() { printf '%-34s %-8s %-9s %-9s %-6s %-6s %s\n' "$@"; }
+
 has() { [[ -n "$(find "$DEST_ROOT" -maxdepth 3 -path "$DEST_ROOT/.git" -prune -o -type f \( "$@" \) -print -quit)" ]]; }
 
-printf '%-34s %-8s %-9s %-9s %-6s %-6s %s\n' REPO TIER ALERTS SECRET LEAKS ZIZMOR RESULT
+row REPO TIER ALERTS SECRET LEAKS ZIZMOR RESULT
 gh repo list "$OWNER" --limit 200 --json name,pushedAt,isArchived,defaultBranchRef \
   -q '.[] | [.name, .pushedAt, .isArchived, (.defaultBranchRef.name // "")] | @tsv' | sort |
 while IFS=$'\t' read -r repo pushed archived default; do
@@ -70,11 +72,12 @@ while IFS=$'\t' read -r repo pushed archived default; do
   if [[ "$archived" == true ]]; then tier=archived; elif [[ "$pushed" > "$CUTOFF" ]]; then tier=active; else tier=dormant; fi
   [[ -n "$ONLY_TIER" && "$tier" != "$ONLY_TIER" ]] && continue
   if [[ "$tier" == archived || -z "$default" ]]; then
-    printf '%-34s %-8s %-9s %-9s %-6s %-6s %s\n' "$repo" "$tier" - - - - "skipped (${default:+archived}${default:-empty repo})"; continue
+    row "$repo" "$tier" - - - - "skipped (${default:+archived}${default:-empty repo})"; continue
   fi
 
-  # Dependabot alerts: free on private repos, alerts only.
-  if ((APPLY)); then gh api -X PUT --silent "repos/$OWNER/$repo/vulnerability-alerts" </dev/null && alerts=on || alerts=FAILED
+  # Dependabot alerts: free on private repos, alerts only. A rotation touches secrets and nothing else.
+  if ((SECRETS_ONLY)); then alerts=-
+  elif ((APPLY)); then gh api -X PUT --silent "repos/$OWNER/$repo/vulnerability-alerts" </dev/null && alerts=on || alerts=FAILED
   else alerts=would-on; fi
 
   # Claude token: active tier only. --secrets-only overwrites (rotation); otherwise set only if missing.
@@ -86,10 +89,13 @@ while IFS=$'\t' read -r repo pushed archived default; do
   fi
 
   if ((SECRETS_ONLY)); then
-    printf '%-34s %-8s %-9s %-9s %-6s %-6s %s\n' "$repo" "$tier" "$alerts" "$secret" - - "secrets-only"; continue
+    row "$repo" "$tier" "$alerts" "$secret" - - "secrets-only"; continue
   fi
-  if gh api --silent "repos/$OWNER/$repo/branches/$BRANCH" >/dev/null 2>&1 </dev/null; then
-    printf '%-34s %-8s %-9s %-9s %-6s %-6s %s\n' "$repo" "$tier" "$alerts" "$secret" - - "branch $BRANCH exists, see its PR"; continue
+  # git/ref takes the slash in the branch name as-is. A branch with no open PR is
+  # a run that died between push and `gh pr create`, or a closed PR: say so.
+  if gh api --silent "repos/$OWNER/$repo/git/ref/heads/$BRANCH" >/dev/null 2>&1 </dev/null; then
+    pr="$(gh pr list -R "$OWNER/$repo" --head "$BRANCH" --state open --json url -q '.[0].url' </dev/null)"
+    row "$repo" "$tier" "$alerts" "$secret" - - "${pr:+exists: $pr}${pr:-STALE branch $BRANCH, no open PR: delete it (gh api -X DELETE repos/$OWNER/$repo/git/refs/heads/$BRANCH) and re-run}"; continue
   fi
 
   DEST_ROOT="$WORK/$repo"
@@ -106,16 +112,22 @@ while IFS=$'\t' read -r repo pushed archived default; do
   has -name pyproject.toml -o -name package.json && semgrep=true
   has -name uv.lock -o -name poetry.lock -o -name 'requirements*.txt' -o -name package-lock.json -o -name pnpm-lock.yaml \
       -o -name yarn.lock -o -name bun.lock -o -name go.sum -o -name Cargo.lock -o -name Dockerfile -o -name Containerfile \
-      -o -name 'compose*.y*ml' -o -name 'docker-compose*.y*ml' && trivy=true
+      -o -name '*.tf' -o -name 'compose*.y*ml' -o -name 'docker-compose*.y*ml' && trivy=true   # same list as security.yml's trivy job
   tools="gitleaks, zizmor"; [[ $semgrep == true ]] && tools+=", semgrep"; [[ $trivy == true ]] && tools+=", trivy"
-  sed -e "s/^      semgrep: false .*/      semgrep: $semgrep/" -e "s/^      trivy: false .*/      trivy: $trivy/" \
-      -e "s/branches: \[main\]/branches: [$default]/" "$T/security-caller.yml" > "$WORK/security.yml"
+  # `|` delimiter: a default branch may contain `/`. Then assert every edit
+  # landed: a template reworded so a pattern no longer matches must stop the
+  # run, not ship semgrep:false everywhere.
+  sed -e "s|^      semgrep: false .*|      semgrep: $semgrep|" -e "s|^      trivy: false .*|      trivy: $trivy|" \
+      -e "s|branches: \[main\]|branches: [$default]|" "$T/security-caller.yml" > "$WORK/security.yml"
+  for want in "      semgrep: $semgrep" "      trivy: $trivy" "    branches: [$default]"; do
+    grep -qxF "$want" "$WORK/security.yml" || { echo "template edit failed for $repo: '$want' not found" >&2; exit 1; }
+  done
   add_file "$WORK/security.yml" .github/workflows/security.yml
 
   if [[ "$tier" == active ]]; then
     add_file "$T/claude-caller.yml" .github/workflows/claude.yml
     cp "$T/dependabot.yml" "$WORK/dependabot.yml"
-    for eco in "uv:uv.lock" "npm:package-lock.json" "npm:pnpm-lock.yaml" "docker:Dockerfile"; do
+    for eco in "uv:uv.lock" "npm:package-lock.json" "npm:pnpm-lock.yaml" "npm:yarn.lock" "bun:bun.lock" "docker:Dockerfile"; do
       [[ -e "$DEST_ROOT/${eco#*:}" ]] || continue
       grep -q "package-ecosystem: ${eco%%:*}$" "$WORK/dependabot.yml" && continue
       printf '  - package-ecosystem: %s\n    directory: /\n    schedule: { interval: weekly }\n    groups: { %s: { patterns: ["*"] } }\n    cooldown: { default-days: 7 }\n    open-pull-requests-limit: 5\n' \
@@ -159,5 +171,5 @@ The human merges. Agents never run \`gh pr merge\`. Runbook: devops-pipeline \`d
     ) >"$WORK/$repo.pr.log" 2>&1 && result="PR $(grep -o 'https://github.com/[^ ]*/pull/[0-9]*' "$WORK/$repo.pr.log" | tail -1)" \
       || result="FAILED: $(tail -1 "$WORK/$repo.pr.log")"
   fi
-  printf '%-34s %-8s %-9s %-9s %-6s %-6s %s\n' "$repo" "$tier" "$alerts" "$secret" "$leaks" "$zfind" "$result"
+  row "$repo" "$tier" "$alerts" "$secret" "$leaks" "$zfind" "$result"
 done

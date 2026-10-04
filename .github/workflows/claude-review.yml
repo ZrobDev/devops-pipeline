@@ -17,6 +17,11 @@ permissions: {}
 
 jobs:
   review:
+    # Defense in depth: callers already filter, but a hand-edited caller must not
+    # be able to hand the token to anyone who can comment.
+    if: >-
+      github.event.comment.author_association == 'OWNER' &&
+      github.event.comment.user.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

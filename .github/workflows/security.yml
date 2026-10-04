@@ -42,9 +42,12 @@ jobs:
       - name: Scan full history
         run: |
           set +e
-          gitleaks git --no-banner --redact --exit-code 1 --report-format json --report-path gitleaks.json .
+          # 42 = findings. gitleaks also exits 1 on its OWN errors (bad config,
+          # unreadable repo); with `--exit-code 1` an error left no report, read
+          # as zero findings, and the gate went green on a scan that never ran.
+          gitleaks git --no-banner --redact --exit-code 42 --report-format json --report-path gitleaks.json .
           rc=$?; set -e
-          [ "$rc" -le 1 ] || { echo "::error::gitleaks exited $rc (scan error, not a finding)"; exit "$rc"; }
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 42 ] || { echo "::error::gitleaks exited $rc (scan error, not a finding)"; exit 1; }
           python3 - <<'PY'
           import json, os, sys
           p = "gitleaks.json"

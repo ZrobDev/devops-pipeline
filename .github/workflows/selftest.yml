@@ -28,10 +28,18 @@ jobs:
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
           tar -xzf gitleaks.tgz gitleaks && sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           pipx install "semgrep==${SEMGREP_VERSION}"
+      # The exact "findings" code, not just non-zero: `!` alone would turn a
+      # scanner ERROR (bad config, registry down) into a green "detection".
+      # gitleaks exits 1 on its own errors, so findings get 42; semgrep uses 1
+      # for findings and 2+ for errors.
       - name: gitleaks must flag the fixture
-        run: '! gitleaks dir --no-banner --redact --exit-code 1 fixtures/'
+        run: |
+          set +e; gitleaks dir --no-banner --redact --exit-code 42 fixtures/; rc=$?
+          [ "$rc" -eq 42 ] || { echo "::error::gitleaks exited $rc, want 42 (findings)"; exit 1; }
       - name: semgrep must flag the fixture at ERROR
-        run: '! semgrep scan --config p/security-audit --metrics=off --severity ERROR --error --quiet fixtures/'
+        run: |
+          set +e; semgrep scan --config p/security-audit --metrics=off --severity ERROR --error --quiet fixtures/; rc=$?
+          [ "$rc" -eq 1 ] || { echo "::error::semgrep exited $rc, want 1 (findings)"; exit 1; }
 
   # The caller templates are not under .github/workflows, so the gate below
   # never sees them; every repo gets a copy, so they are audited here.
@@ -46,6 +54,37 @@ jobs:
           persist-credentials: false
       - run: pipx install "zizmor==${ZIZMOR_VERSION}"
       - run: zizmor --min-severity medium --format plain --color never templates/security-caller.yml templates/claude-caller.yml
+      - name: shellcheck the rollout script   # preinstalled on ubuntu-latest
+        run: shellcheck -S warning scripts/*.sh
+
+  # security.yml is what callers run; this file repeats some of its pins. Fail
+  # if they drift, and prove the pinned trivy asset + checksum still resolve
+  # (no selftest job runs trivy, so a typo there would first break a caller).
+  pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: selftest.yml pins match security.yml
+        run: |
+          python3 - <<'PY'
+          import yaml
+          prod = yaml.safe_load(open(".github/workflows/security.yml"))["env"]
+          test = yaml.safe_load(open(".github/workflows/selftest.yml"))["env"]
+          bad = [k for k in test if prod.get(k) != test[k]]
+          for k in bad:
+              print(f"::error::{k}: selftest {test[k]!r} != security.yml {prod.get(k)!r}")
+          raise SystemExit(1 if bad else 0)
+          PY
+      - name: trivy release asset matches its pinned checksum
+        run: |
+          TRIVY_VERSION="$(sed -n 's/^  TRIVY_VERSION: *"\([^"]*\)".*/\1/p' .github/workflows/security.yml)"
+          TRIVY_SHA256="$(sed -n 's/^  TRIVY_SHA256: *"\([^"]*\)".*/\1/p' .github/workflows/security.yml)"
+          [ -n "$TRIVY_VERSION" ] && [ -n "$TRIVY_SHA256" ] || { echo "::error::could not read trivy pins from security.yml"; exit 1; }
+          curl -sSfL -o trivy.tgz "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tgz" | sha256sum -c -
 
   # The real workflow also runs here, on this repo, so zizmor audits every file
   # in .github/workflows and gitleaks sees the fixture in history:
