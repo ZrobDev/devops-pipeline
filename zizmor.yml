@@ -1,0 +1,10 @@
+# Keep in lockstep with the inline config in .github/workflows/security.yml
+# (the copy every caller repo runs). Why each rule is set: see that file.
+rules:
+  ref-confusion:
+    disable: true
+  unpinned-uses:
+    config:
+      policies:
+        "ZrobDev/*": ref-pin
+        "*": hash-pin

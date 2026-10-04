@@ -1,0 +1,10 @@
+# fixtures/ holds a deliberately fake AWS key that selftest.yml REQUIRES gitleaks
+# to flag (it scans fixtures/ directly with `gitleaks dir`). The repo-wide gate
+# scans history and must not go red on that same fixture, so it is allowlisted
+# here by path, and only that path.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "selftest fixture: fake credential the self-test must detect"
+paths = ['''^fixtures/''']

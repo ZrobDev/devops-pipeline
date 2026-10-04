@@ -1,0 +1,56 @@
+name: selftest
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: selftest-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+env:
+  GITLEAKS_VERSION: "8.30.1"   # keep in lockstep with security.yml
+  GITLEAKS_SHA256:  "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  SEMGREP_VERSION:  "1.176.1"
+  ZIZMOR_VERSION:   "1.30.0"
+jobs:
+  # Proves the gate can FAIL: both tools must flag fixtures/vuln_sample.py.
+  # `!` inverts each exit code, so this job is green only when they are red.
+  must-fail-on-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks && sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          pipx install "semgrep==${SEMGREP_VERSION}"
+      - name: gitleaks must flag the fixture
+        run: '! gitleaks dir --no-banner --redact --exit-code 1 fixtures/'
+      - name: semgrep must flag the fixture at ERROR
+        run: '! semgrep scan --config p/security-audit --metrics=off --severity ERROR --error --quiet fixtures/'
+
+  # The caller templates are not under .github/workflows, so the gate below
+  # never sees them; every repo gets a copy, so they are audited here.
+  templates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx install "zizmor==${ZIZMOR_VERSION}"
+      - run: zizmor --min-severity medium --format plain --color never templates/security-caller.yml templates/claude-caller.yml
+
+  # The real workflow also runs here, on this repo, so zizmor audits every file
+  # in .github/workflows and gitleaks sees the fixture in history:
+  # .gitleaks.toml allowlists fixtures/.
+  gate:
+    uses: ./.github/workflows/security.yml
+    with:
+      semgrep: false
