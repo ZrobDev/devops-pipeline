@@ -1,0 +1,155 @@
+# Reusable security gate for ZrobDev repos. No Security tab on a personal Free
+# account, so findings go to the job log + step summary and the exit code IS
+# the gate. Every tool is a checksum-verified release binary or a pipx pin:
+# the only third-party action code that runs here is actions/checkout.
+name: security
+
+on:
+  workflow_call:
+    inputs:
+      semgrep:        { type: boolean, default: false }
+      semgrep-config: { type: string,  default: p/security-audit }
+      trivy:          { type: boolean, default: false }
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256:  "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"   # gitleaks_8.30.1_linux_x64.tar.gz
+  TRIVY_VERSION:    "0.74.0"
+  TRIVY_SHA256:     "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"   # trivy_0.74.0_Linux-64bit.tar.gz
+  SEMGREP_VERSION:  "1.176.1"
+  ZIZMOR_VERSION:   "1.30.0"
+  # Inputs reach `run:` ONLY via env: `${{ inputs.x }}` inside run is exactly
+  # what zizmor's template-injection audit fails on, and it audits this file.
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks (checksum-verified release binary)
+        run: |
+          curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks && sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan full history
+        run: |
+          set +e
+          # 42 = findings. gitleaks also exits 1 on its OWN errors (bad config,
+          # unreadable repo); with `--exit-code 1` an error left no report, read
+          # as zero findings, and the gate went green on a scan that never ran.
+          gitleaks git --no-banner --redact --exit-code 42 --report-format json --report-path gitleaks.json .
+          rc=$?; set -e
+          [ "$rc" -eq 0 ] || [ "$rc" -eq 42 ] || { echo "::error::gitleaks exited $rc (scan error, not a finding)"; exit 1; }
+          python3 - <<'PY'
+          import json, os, sys
+          p = "gitleaks.json"
+          f = json.load(open(p)) if os.path.exists(p) and os.path.getsize(p) else []
+          out = [f"## gitleaks: {len(f)} finding(s)", ""]
+          if f:
+              out += ["| Rule | File | Line | Commit |", "|---|---|---|---|"]
+              out += [f"| {x['RuleID']} | `{x['File']}` | {x['StartLine']} | {x['Commit'][:7]} |" for x in f[:200]]
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write("\n".join(out) + "\n")
+          print("\n".join(out))
+          sys.exit(1 if f else 0)
+          PY
+
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}   # online audits: known-vulnerable-actions, impostor-commit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx install "zizmor==${ZIZMOR_VERSION}" && zizmor --version
+      - name: Audit the caller's workflows
+        # Config is inline because this job only has the CALLER's checkout.
+        # Keep in lockstep with this repo's root zizmor.yml. ref-confusion is
+        # the one audit that must list branches of ZrobDev/devops-pipeline,
+        # which the caller's token cannot read: it aborts the whole run instead
+        # of warning. Own-repo refs may tag-pin (@v1); everything else hash-pins.
+        run: |
+          cat > "$RUNNER_TEMP/zizmor.yml" <<'EOF'
+          rules:
+            ref-confusion:
+              disable: true
+            unpinned-uses:
+              config:
+                policies:
+                  "ZrobDev/*": ref-pin
+                  "*": hash-pin
+          EOF
+          { echo '## zizmor'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          zizmor --config "$RUNNER_TEMP/zizmor.yml" --min-severity medium --format plain --color never .github/workflows/ | tee -a "$GITHUB_STEP_SUMMARY"
+          rc=${PIPESTATUS[0]}; set -e
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+  semgrep:
+    if: inputs.semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SEMGREP_CONFIG: ${{ inputs.semgrep-config }}
+      SEMGREP_SEND_METRICS: "off"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx install "semgrep==${SEMGREP_VERSION}" && semgrep --version
+      - name: Scan (report every severity, gate on ERROR)
+        run: |
+          semgrep scan --config "$SEMGREP_CONFIG" --metrics=off --quiet --json -o semgrep.json .
+          python3 - <<'PY'
+          import json, os, sys
+          r = json.load(open("semgrep.json"))["results"]
+          err = [x for x in r if x["extra"]["severity"] == "ERROR"]
+          out = [f"## semgrep ({os.environ['SEMGREP_CONFIG']}): {len(r)} finding(s), {len(err)} ERROR", ""]
+          if r:
+              out += ["| Sev | Rule | Location | Message |", "|---|---|---|---|"]
+              for x in r[:200]:
+                  msg = x["extra"]["message"][:100].replace("\n", " ").replace("|", "\\|")
+                  out.append(f"| {x['extra']['severity']} | {x['check_id'].rsplit('.', 1)[-1]} | `{x['path']}:{x['start']['line']}` | {msg} |")
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write("\n".join(out) + "\n")
+          print("\n".join(out))
+          sys.exit(1 if err else 0)
+          PY
+
+  trivy:
+    if: inputs.trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: trivy fs (checksum-verified release binary; NEVER the action)
+        run: |
+          found=$(find . -path ./.git -prune -o -type f \( \
+            -name uv.lock -o -name poetry.lock -o -name 'requirements*.txt' -o -name Pipfile.lock \
+            -o -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock -o -name bun.lock \
+            -o -name go.sum -o -name Cargo.lock -o -name Dockerfile -o -name Containerfile \
+            -o -name '*.tf' -o -name 'compose*.y*ml' -o -name 'docker-compose*.y*ml' \) -print | head -50)
+          if [ -z "$found" ]; then
+            echo "## trivy: no manifests found, skipped" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          printf 'targets:\n%s\n' "$found"
+          curl -sSfL -o trivy.tgz "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tgz" | sha256sum -c -
+          tar -xzf trivy.tgz trivy && sudo install -m 0755 trivy /usr/local/bin/trivy
+          { echo '## trivy'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          trivy fs --scanners vuln,misconfig --severity CRITICAL,HIGH --exit-code 1 --no-progress --format table . | tee -a "$GITHUB_STEP_SUMMARY"
+          rc=${PIPESTATUS[0]}; set -e
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"

@@ -1,0 +1,22 @@
+# Security gates: gitleaks + zizmor always; semgrep/trivy where this repo has
+# code/manifests. Logic lives in ZrobDev/devops-pipeline; see its docs/runbook.md.
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    uses: ZrobDev/devops-pipeline/.github/workflows/security.yml@v1   # own repo: tag; third parties: SHA
+    with:
+      semgrep: false   # rollout.sh sets true where pyproject.toml/package.json exist
+      trivy: false     # rollout.sh sets true where lockfiles/Dockerfile/compose exist
