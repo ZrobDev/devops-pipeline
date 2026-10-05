@@ -7,6 +7,8 @@ script, and the runbook. `CLAUDE.md` is a symlink to this file.
 Read `docs/decisions.md` before changing what the suite does; read
 `docs/runbook.md` for how it is used day to day.
 
+- `docs/retro/` — one retro per session, newest first; read the newest before host work.
+
 ## Rules
 
 - **Never run `gh pr merge`.** Only the human merges, after checks are green.
