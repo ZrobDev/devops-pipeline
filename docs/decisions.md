@@ -14,7 +14,7 @@ doc was dropped.
 | Secrets | gitleaks, full history, every repo, hard fail. Checksum-verified release binary, not `gitleaks-action` (which downloads its binary unverified). | $0 |
 | Workflow lint | zizmor, every repo, medium+ fails. | $0 |
 | SAST | Semgrep CE `p/security-audit`, Python/TS repos, only ERROR fails. | $0 |
-| Dependencies | Dependabot alerts on every repo; version-update PRs only on active repos. Trivy (pinned binary) where lockfiles, Dockerfiles or compose files exist. | $0 |
+| Dependencies | Dependabot alerts on every repo; version-update PRs only on active repos. Trivy (pinned binary) where lockfiles, Dockerfiles or compose files exist; CRITICAL/HIGH with a fix available fails (`--ignore-unfixed`: a CVE with no fixed version is unactionable, so it is not part of the bar). | $0 |
 | AI review, automatic | Codex connector (ChatGPT Plus), on open / ready-for-review. | already paid |
 | AI review, on demand | `anthropics/claude-code-action` on the Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`), fired by an owner's `@claude` comment. Comment-only. | already paid |
 | Local | `/delegate-review`, `/delegate-security`, `/finish-feature`, `/ci-triage`, pre-push gitleaks hook. | flat plans |
@@ -70,6 +70,10 @@ doc was dropped.
   rather than warning. Every other online audit stays on. Config: `zizmor.yml`
   (here) and the inline copy in `security.yml` (callers).
 - **A caller's own `zizmor.yml` is ignored** in CI, because `security.yml` passes `--config`.
+- **No selftest job runs trivy's fail path.** `fixtures/` holds no lockfile or
+  Dockerfile; `pins` only proves the binary resolves. A change to the trivy
+  flags is verified by hand against a red caller (2026-10-04: `--ignore-unfixed`
+  checked on 12 red repos, all still exit 1; it dropped 2 of ~200 findings).
 - **Dependabot cannot read this private repo**, so it never bumps the
   `@v1` line in callers. That's fine because the tag moves.
 
