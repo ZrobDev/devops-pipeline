@@ -95,7 +95,9 @@ while IFS=$'\t' read -r repo pushed archived default; do
   # a run that died between push and `gh pr create`, or a closed PR: say so.
   if gh api --silent "repos/$OWNER/$repo/git/ref/heads/$BRANCH" >/dev/null 2>&1 </dev/null; then
     pr="$(gh pr list -R "$OWNER/$repo" --head "$BRANCH" --state open --json url -q '.[0].url' </dev/null)"
-    row "$repo" "$tier" "$alerts" "$secret" - - "${pr:+exists: $pr}${pr:-STALE branch $BRANCH, no open PR: delete it (gh api -X DELETE repos/$OWNER/$repo/git/refs/heads/$BRANCH) and re-run}"; continue
+    if [[ -n "$pr" ]]; then note="exists: $pr"
+    else note="STALE branch $BRANCH, no open PR: delete it (gh api -X DELETE repos/$OWNER/$repo/git/refs/heads/$BRANCH) and re-run"; fi
+    row "$repo" "$tier" "$alerts" "$secret" - - "$note"; continue
   fi
 
   DEST_ROOT="$WORK/$repo"
