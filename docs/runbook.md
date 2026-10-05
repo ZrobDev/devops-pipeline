@@ -37,7 +37,8 @@ Fix the code. If it is truly a false positive, a `# nosemgrep: <rule-id>`
 comment on the line, with the reason.
 
 **trivy.** CRITICAL/HIGH in a dependency: bump it (Dependabot often already
-has the PR). No fix available: record it in the PR and revisit.
+has the PR). No fix available: the gate skips it (`--ignore-unfixed`); it
+resurfaces as soon as a fixed version is published.
 
 ## Dependabot
 
