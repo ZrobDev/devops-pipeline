@@ -70,7 +70,7 @@ Two commits went straight onto rollout branches before those PRs merged:
 git ls-remote origin refs/tags/v1 | cut -c1-7   # 07c453a
 gh api 'repos/ZrobDev/devops-pipeline/contents/.github/workflows/security.yml?ref=v1' --jq .content | base64 -d | grep -c -- '--ignore-unfixed'   # 1
 for r in payroll-pipeline cpr-download-automation calidad-cotizador markit 2markit hermes-personalization hermes-dokploy-setup soi-renewal-automation split-time-sheets financial-report-generator astro-zrobdev-portfolio lease-agreement; do d=$(gh repo view ZrobDev/$r --json defaultBranchRef --jq .defaultBranchRef.name); printf '%s %s\n' $r "$(gh run list -R ZrobDev/$r -b $d -e push -L 15 --json workflowName,conclusion --jq '[.[]|select(.workflowName|test("ecurity"))][0].conclusion')"; done   # success for the first 7; failure (trivy only) for soi/split/financial/astro until Owed merges; lease null until #2
-gh search prs --owner ZrobDev --state open "ci(security): add devops-pipeline"   # only lease-agreement#2 until merged
+gh search prs --owner ZrobDev --state open --match title "add devops-pipeline gates" --json repository,number --jq ".[]|\"\\(.repository.name)#\\(.number)\""   # empty (all 30 rollout PRs closed/merged)
 ```
 
 ## Failure modes
