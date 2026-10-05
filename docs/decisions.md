@@ -53,7 +53,7 @@ doc was dropped.
 | `trivy-action` / `setup-trivy` | Compromised 2026-02-28 and 2026-03-19 (GHSA-69fq-xp46-6x23). Binary only, checksum-pinned, from an immutable release. |
 | SARIF upload / Security tab | Needs GitHub Code Security on an org Team/Enterprise plan. Findings go to the job log and step summary; the exit code is the gate. |
 | Branch protection / rulesets | 403 on private repos under GitHub Free. |
-| Dependabot auto security-fix PRs | Alert fatigue across 34 repos. Turn on per repo if wanted. |
+| Dependabot auto security-fix PRs | Alert fatigue across 34 repos. Turn on per repo if wanted: `rollout.sh --repo NAME --security-fixes --apply`. Opted in 2026-10-04: the trivy-red repos, because version updates only start once the red rollout PR merges and dormant repos never get them. |
 | CI auto-triage with Claude | Minutes and quota on every red run; `/ci-triage` does it locally. |
 | Claude pushing fixes | See "comment-only" above. |
 

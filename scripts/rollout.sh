@@ -5,11 +5,13 @@
 #   scripts/rollout.sh --repo NAME --apply      # one repo
 #   scripts/rollout.sh --tier active --apply    # a wave
 #   scripts/rollout.sh --secrets-only --apply   # (re)push the Claude token = rotation
+#   scripts/rollout.sh --repo NAME --security-fixes --apply   # opt one repo into fix PRs, nothing else
 #
 # Tiers: archived -> skipped; pushed within 90 days -> active (full suite);
 # else dormant (security gates + Dependabot alerts, no AI review, no secret).
 #
-# Per repo it: enables Dependabot alerts (never auto-fix PRs); pushes the Claude
+# Per repo it: enables Dependabot alerts (security-fix PRs only with
+# --security-fixes, one --repo at a time: docs/decisions.md); pushes the Claude
 # token from Doppler (active only, over stdin, never argv or logs); clones,
 # counts gitleaks history hits and zizmor findings (reports only, never writes
 # an allowlist); adds the tier's files on branch ci/devops-pipeline; opens a PR.
@@ -23,20 +25,25 @@ DOPPLER_CONFIG=prd
 SECRET=CLAUDE_CODE_OAUTH_TOKEN
 ZIZMOR=zizmor@1.30.0   # keep in lockstep with security.yml
 
-APPLY=0 SECRETS_ONLY=0 ONLY_REPO="" ONLY_TIER=""
+APPLY=0 SECRETS_ONLY=0 FIXES=0 ONLY_REPO="" ONLY_TIER=""
 while (($#)); do
   case "$1" in
     --apply) APPLY=1 ;;
     --dry-run) APPLY=0 ;;
     --secrets-only) SECRETS_ONLY=1 ;;
+    --security-fixes) FIXES=1 ;;
     --repo) ONLY_REPO="${2:?--repo needs a name}"; shift ;;
     --tier) ONLY_TIER="${2:?--tier needs active|dormant}"; shift ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown flag: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
 done
 [[ -z "$ONLY_TIER" || "$ONLY_TIER" == active || "$ONLY_TIER" == dormant ]] || { echo "--tier must be active or dormant" >&2; exit 2; }
+# Fix PRs are opt-in per repo (alert fatigue fleet-wide): never for a wave or a rotation.
+if ((FIXES)) && [[ -z "$ONLY_REPO" ]] || ((FIXES && SECRETS_ONLY)); then
+  echo "--security-fixes needs --repo NAME and no --secrets-only" >&2; exit 2
+fi
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 T="$HERE/templates"
@@ -79,10 +86,16 @@ while IFS=$'\t' read -r repo pushed archived default; do
   if ((SECRETS_ONLY)); then alerts=-
   elif ((APPLY)); then gh api -X PUT --silent "repos/$OWNER/$repo/vulnerability-alerts" </dev/null && alerts=on || alerts=FAILED
   else alerts=would-on; fi
+  if ((FIXES)); then  # state is re-read after the PUT: a paused repo may stay paused
+    fixes() { gh api "repos/$OWNER/$repo/automated-security-fixes" -q 'if .enabled then (if .paused then "paused" else "on" end) else "off" end' </dev/null 2>/dev/null || echo ERR; }
+    was="$(fixes)"
+    if ((APPLY)); then gh api -X PUT --silent "repos/$OWNER/$repo/automated-security-fixes" </dev/null && alerts+=" fixes:$was>$(fixes)" || alerts+=" fixes:$was>FAILED"
+    else alerts+=" fixes:$was>would-on"; fi
+  fi
 
   # Claude token: active tier only. --secrets-only overwrites (rotation); otherwise set only if missing.
   secret=-
-  if [[ "$tier" == active ]]; then
+  if [[ "$tier" == active ]] && ((!FIXES)); then
     if gh secret list -R "$OWNER/$repo" --json name -q '.[].name' </dev/null | grep -qx "$SECRET" && ((!SECRETS_ONLY)); then secret=exists
     elif ((APPLY)); then push_secret "$repo" </dev/null && secret="set" || secret=FAILED
     else secret=would-set; fi
@@ -91,6 +104,7 @@ while IFS=$'\t' read -r repo pushed archived default; do
   if ((SECRETS_ONLY)); then
     row "$repo" "$tier" "$alerts" "$secret" - - "secrets-only"; continue
   fi
+  if ((FIXES)); then row "$repo" "$tier" "$alerts" - - - "security-fixes only"; continue; fi
   # git/ref takes the slash in the branch name as-is. A branch with no open PR is
   # a run that died between push and `gh pr create`, or a closed PR: say so.
   if gh api --silent "repos/$OWNER/$repo/git/ref/heads/$BRANCH" >/dev/null 2>&1 </dev/null; then
