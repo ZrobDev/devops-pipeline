@@ -18,4 +18,4 @@ jobs:
     uses: ZrobDev/devops-pipeline/.github/workflows/python-ci.yml@v1   # own repo: tag; third parties: SHA
     with:
       python-version: "3.12"
-      ruff: true   # false where ruff is not in the dev group
+      ruff: true   # false where ruff is in neither a dependency group nor an extra

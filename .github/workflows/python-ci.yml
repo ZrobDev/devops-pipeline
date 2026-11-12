@@ -1,7 +1,9 @@
 # Reusable Python CI for ZrobDev uv repos: `uv sync --frozen`, ruff, pytest.
 # Callers run it on pull_request ONLY: Actions minutes are a Free-plan budget
 # and a second run on push to main repeats what the PR run proved. Callers must
-# commit uv.lock; set `ruff: false` where ruff is not in the dev group.
+# commit uv.lock. Dev tools are installed whether the repo declares them as a
+# dependency group or as an extra (ZrobDev repos do both); set `ruff: false`
+# where ruff is in neither.
 name: python-ci
 
 on:
@@ -30,8 +32,8 @@ jobs:
           python-version: ${{ inputs.python-version }}
           enable-cache: true
           cache-dependency-glob: ${{ inputs.working-directory }}/uv.lock
-      - name: Install from the lockfile (fails if the lock is stale)
-        run: uv sync --frozen
+      - name: Install from the lockfile, all groups and extras (fails if the lock is stale)
+        run: uv sync --frozen --all-groups --all-extras
       - name: ruff
         if: inputs.ruff
         run: uv run ruff check .

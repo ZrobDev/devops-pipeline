@@ -53,7 +53,7 @@ resurfaces as soon as a fixed version is published.
 
 - New repo: `scripts/rollout.sh --repo NAME` (dry run), then add `--apply`, then merge the PR.
 - Python repo: add `templates/python-ci-caller.yml` as `.github/workflows/ci.yml`
-  (pull_request only; needs `uv.lock`, `ruff: false` without ruff in the dev group).
+  (pull_request only; needs `uv.lock`; dev tools come from any group or extra, `ruff: false` if ruff is in neither).
 - Deploying to a tailnet host: `docs/deploy-tailscale-ssh.md`.
 - Changing a reusable workflow here: PR → `selftest` green → merge → move the tag:
   `git fetch origin && git tag -f v1 origin/main && git push -f origin v1`.
