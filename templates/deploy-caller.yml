@@ -1,0 +1,28 @@
+# Deploy to a host over Tailscale SSH once the security gate passes.
+# workflow_dispatch ONLY: on a private Free-plan repo an environment cannot
+# require reviewers, so the human click that starts this run IS the approval.
+# Logic lives in ZrobDev/devops-pipeline; setup in its docs/deploy-tailscale-ssh.md.
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  gate:
+    permissions:
+      contents: read
+    uses: ZrobDev/devops-pipeline/.github/workflows/security.yml@v1   # own repo: tag; third parties: SHA
+  deploy:
+    needs: gate
+    permissions:
+      id-token: write
+    uses: ZrobDev/devops-pipeline/.github/workflows/deploy-tailscale-ssh.yml@v1   # own repo: tag; third parties: SHA
+    with:
+      environment: production
+      host: 100.71.204.51                 # tailnet IP or MagicDNS name of the host
+      user: deploy
+      command: sudo -n -u hermes /srv/projects/REPO/vps/deploy-from-ci.sh
+      oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}   # repository variable, not a secret
+      audience: ${{ vars.TS_OIDC_AUDIENCE }}

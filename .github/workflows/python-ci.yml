@@ -1,0 +1,39 @@
+# Reusable Python CI for ZrobDev uv repos: `uv sync --frozen`, ruff, pytest.
+# Callers run it on pull_request ONLY: Actions minutes are a Free-plan budget
+# and a second run on push to main repeats what the PR run proved. Callers must
+# commit uv.lock; set `ruff: false` where ruff is not in the dev group.
+name: python-ci
+
+on:
+  workflow_call:
+    inputs:
+      python-version:    { type: string,  default: "3.12" }
+      working-directory: { type: string,  default: "." }
+      ruff:              { type: boolean, default: true }
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: ${{ inputs.python-version }}
+          enable-cache: true
+          cache-dependency-glob: ${{ inputs.working-directory }}/uv.lock
+      - name: Install from the lockfile (fails if the lock is stale)
+        run: uv sync --frozen
+      - name: ruff
+        if: inputs.ruff
+        run: uv run ruff check .
+      - name: pytest
+        run: uv run pytest

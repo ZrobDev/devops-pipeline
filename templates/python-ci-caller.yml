@@ -1,0 +1,21 @@
+# Python CI: uv sync --frozen, ruff, pytest. Logic lives in ZrobDev/devops-pipeline.
+# pull_request ONLY: the Free plan's Actions minutes are one shared budget and a
+# second run on push to main repeats the PR run.
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    uses: ZrobDev/devops-pipeline/.github/workflows/python-ci.yml@v1   # own repo: tag; third parties: SHA
+    with:
+      python-version: "3.12"
+      ruff: true   # false where ruff is not in the dev group
