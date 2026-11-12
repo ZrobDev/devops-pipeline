@@ -8,6 +8,7 @@ repo, on free tools and subscriptions already paid for.
 | Know the daily loop, or fix a red check | [docs/runbook.md](docs/runbook.md) |
 | Set up or rotate the Claude token; enable Codex review | [docs/setup-secrets.md](docs/setup-secrets.md) |
 | Know why it is built this way, what was rejected, PR-Agent, gh-secure | [docs/decisions.md](docs/decisions.md) |
+| Deploy to a tailnet host from Actions (no stored secrets) | [docs/deploy-tailscale-ssh.md](docs/deploy-tailscale-ssh.md) |
 | Roll the suite out to a repo | `scripts/rollout.sh --help` (dry run by default) |
 
 ## What a repo gets

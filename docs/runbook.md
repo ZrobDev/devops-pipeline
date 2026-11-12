@@ -52,6 +52,9 @@ resurfaces as soon as a fixed version is published.
 ## Adding a repo or changing the suite
 
 - New repo: `scripts/rollout.sh --repo NAME` (dry run), then add `--apply`, then merge the PR.
+- Python repo: add `templates/python-ci-caller.yml` as `.github/workflows/ci.yml`
+  (pull_request only; needs `uv.lock`, `ruff: false` without ruff in the dev group).
+- Deploying to a tailnet host: `docs/deploy-tailscale-ssh.md`.
 - Changing a reusable workflow here: PR → `selftest` green → merge → move the tag:
   `git fetch origin && git tag -f v1 origin/main && git push -f origin v1`.
   Every caller picks it up on its next run. A bad `v1` breaks every repo at

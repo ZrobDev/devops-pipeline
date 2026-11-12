@@ -1,0 +1,57 @@
+# Reusable deploy over Tailscale SSH. The runner joins the tailnet as an
+# ephemeral node tagged tag:ci, authenticated by the workflow's own OIDC token
+# (a Tailscale OAuth client of type "OIDC federated identity"), so NO secret is
+# stored in GitHub. Tailscale SSH on the host authenticates that node; the
+# tailnet policy's `ssh` rule decides which Unix user it may become; the host's
+# sudoers decides the one command that user may run. This file decides none of
+# that. Setup and the Free-plan caveats: docs/deploy-tailscale-ssh.md.
+name: deploy-tailscale-ssh
+
+on:
+  workflow_call:
+    inputs:
+      environment:     { type: string, required: true }
+      host:            { type: string, required: true }    # tailnet IP or MagicDNS name
+      user:            { type: string, default: deploy }
+      command:         { type: string, required: true }    # the exact remote command
+      oauth-client-id: { type: string, required: true }    # an identifier, not a secret
+      audience:        { type: string, required: true }    # as configured on the OAuth client
+
+permissions: {}
+
+env:
+  TAILSCALE_VERSION: "1.104.6"
+  TAILSCALE_SHA256:  "82a85429f733e52fd1a95dedb2c8dd8cd46d6603504e566a56b1779c9a7a4809"   # tailscale_1.104.6_amd64.tgz
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false   # never abort a deploy half way
+    permissions:
+      id-token: write   # the token Tailscale exchanges for a tag:ci node key
+    steps:
+      - name: Join the tailnet as an ephemeral tag:ci node
+        uses: tailscale/github-action@99a8333667fff04fdd6cffb46dfd409f8329a7bf # v4.3.0
+        with:
+          oauth-client-id: ${{ inputs.oauth-client-id }}
+          audience: ${{ inputs.audience }}
+          tags: tag:ci
+          version: ${{ env.TAILSCALE_VERSION }}
+          sha256sum: ${{ env.TAILSCALE_SHA256 }}
+          ping: ${{ inputs.host }}
+      - name: Run the deploy command on the host
+        env:
+          HOST: ${{ inputs.host }}
+          USER_NAME: ${{ inputs.user }}
+          COMMAND: ${{ inputs.command }}
+        run: |
+          # Tailscale SSH presents a per-node host key and the connection is
+          # already authenticated by the tailnet, so accept-new on a throwaway
+          # known_hosts is the documented pattern. BatchMode: never wait on a prompt.
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts" \
+              "$USER_NAME@$HOST" -- "$COMMAND"

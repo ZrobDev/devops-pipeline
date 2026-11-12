@@ -53,7 +53,7 @@ jobs:
         with:
           persist-credentials: false
       - run: pipx install "zizmor==${ZIZMOR_VERSION}"
-      - run: zizmor --min-severity medium --format plain --color never templates/security-caller.yml templates/claude-caller.yml
+      - run: zizmor --min-severity medium --format plain --color never templates/security-caller.yml templates/claude-caller.yml templates/python-ci-caller.yml templates/deploy-caller.yml templates/aws-oidc-deploy.yml templates/terraform-plan-comment.yml
       - name: shellcheck the rollout script   # preinstalled on ubuntu-latest
         run: shellcheck -S warning scripts/*.sh
 
