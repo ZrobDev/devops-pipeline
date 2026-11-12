@@ -31,7 +31,7 @@ gh repo view --json visibility --jq .visibility                                 
 git ls-remote --tags origin | grep -E 'refs/tags/v1\^\{\}$' | cut -c1-7              # 0b97dbb (v1 = v1.1.1)
 gh api repos/ZrobDev/devops-pipeline/rulesets --jq length                          # 2
 gh run list --workflow selftest --branch main --limit 1 --json conclusion --jq '.[0].conclusion'   # success
-zizmor --min-severity medium --format plain --color never .github/workflows templates | tail -1   # No findings to report
+uv tool run --from 'zizmor==1.30.0' zizmor --min-severity medium --format plain --color never .github/workflows templates | tail -1   # No findings to report (pin = ZIZMOR_VERSION in security.yml; local 1.31.1 flags claude.yml issue_comment as dangerous-triggers)
 ```
 
 ## Failure modes
@@ -58,14 +58,14 @@ zizmor --min-severity medium --format plain --color never .github/workflows temp
 |---|---|---|
 | update | cicd-upgrade-state-2026-11.md | record v1.1.1, public, rulesets, the four hermes runs, and that retros are written |
 
-Status: pending
+Status: applied 2026-11-12
 
 ## Skill feedback
 | Skill | Repo | What the agent did | What it should have done | Evidence | Issue |
 |---|---|---|---|---|---|
-| release | ZrobDev/devops-skills | procedure says `git tag -s`; this clone has no signing key, so the step would fail | say "sign if a key is configured, else annotated `-a`, and record which" | this retro, Deviations row 2 | |
+| release | ZrobDev/devops-skills | procedure says `git tag -s`; this clone has no signing key, so the step would fail | say "sign if a key is configured, else annotated `-a`, and record which" | this retro, Deviations row 2 | https://github.com/ZrobDev/devops-skills/issues/4 |
 
-Status: pending
+Status: applied 2026-11-12
 
 ## Graduation candidates
 - `after moving a floating tag, push a commit to a caller; never gh run rerun` — test: 2 projects: devops-pipeline run 43160244062 only → fails test (one project so far)
