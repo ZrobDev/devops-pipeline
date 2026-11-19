@@ -1,7 +1,8 @@
 # Deploy to AWS with OIDC: no stored AWS keys. The job's identity token
-# (sub = repo:OWNER/REPO:environment:production) is exchanged for short-lived
-# credentials of a role whose trust policy names exactly that sub and the
-# audience sts.amazonaws.com. Modernised from Link-/ci-cd-intro cd-oidc.yaml.
+# (sub = <prefix>:environment:production; the prefix is immutable, repo:OWNER@id/REPO@id:
+# gh api repos/OWNER/REPO/actions/oidc/customization/sub --jq .sub_claim_prefix)
+# is exchanged for short-lived credentials of a role whose trust policy names
+# exactly that sub and the audience sts.amazonaws.com. Modernised from Link-/ci-cd-intro cd-oidc.yaml.
 # Required reviewers on the environment work on the Free plan only for PUBLIC repos.
 name: Deploy (AWS)
 
