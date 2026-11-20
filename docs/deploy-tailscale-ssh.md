@@ -8,7 +8,7 @@ single command that identity may run.
 
 ```
 GitHub job (environment: production)
-  └─ OIDC token  sub=repo:OWNER/REPO:environment:production
+  └─ OIDC token  sub=repo:OWNER@id/REPO@id:environment:production
        └─ Tailscale OAuth client (OIDC federated identity, scope auth_keys, tag:ci)
             └─ ephemeral node tag:ci  ──ssh──►  host, user `deploy`  (policy `ssh` rule)
                                                   └─ sudo -n -u hermes /srv/projects/REPO/vps/deploy-from-ci.sh  (sudoers)
@@ -44,7 +44,15 @@ one host and one Unix user.
 ### 2. Tailscale OAuth client (admin console → Settings → OAuth clients)
 
 Type **OIDC federated identity**. Issuer `https://token.actions.githubusercontent.com`.
-Subject `repo:ZrobDev/REPO:environment:production` (exact; one client per repo).
+Subject `<prefix>:environment:production` (exact; one client per repo). Read the
+prefix from GitHub, never type it: repos use immutable subjects that carry the
+owner and repo ids (`repo:ZrobDev@58427889/REPO@<repo id>`), so the plain
+`repo:ZrobDev/REPO` form fails the token exchange with a 403.
+
+```sh
+gh api repos/ZrobDev/REPO/actions/oidc/customization/sub --jq .sub_claim_prefix
+```
+
 Audience: pick a fixed string, e.g. `tailscale-ci-REPO`. Scope `auth_keys`
 (devices: write), tag `tag:ci`. Record the client id and the audience; neither
 is a secret. Set them as **repository variables** (`gh variable set
@@ -103,7 +111,7 @@ replace `REPO`, keep `workflow_dispatch` as the only trigger on private repos.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `tailscale up` fails with an auth error | OAuth client subject does not match `repo:…:environment:production`, or the job lacks `id-token: write` | Compare the client's subject with the job's `environment:`; check `permissions` on both caller job and reusable job |
+| `tailscale up` fails with an auth error (403 at the token exchange) | OAuth client subject does not match `<prefix>:environment:production` (often the plain `repo:Owner/name` form where GitHub sends immutable `repo:Owner@id/name@id`), or the job lacks `id-token: write` | Compare the client's subject with `gh api repos/OWNER/REPO/actions/oidc/customization/sub --jq .sub_claim_prefix` plus the job's `environment:`; check `permissions` on both caller job and reusable job |
 | ping succeeds, ssh is refused | no `ssh` rule for `tag:ci → host` as that user, or Tailscale SSH not enabled on the node | `tailscale set --ssh` on the host; check the policy `ssh` block |
 | `sudo: a password is required` | sudoers path differs from the command | the path in sudoers and in the caller must be byte-identical |
 | `fatal: Not possible to fast-forward` | local edits on the host checkout | inspect `git status` as hermes, clean, re-run |
